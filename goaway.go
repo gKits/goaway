@@ -14,15 +14,12 @@ type GoAway struct {
 }
 
 type GoAwayFunctions struct {
-	UserFromName            func(string) (interface{}, error)
-	UserFromID              func(interface{}) (interface{}, error)
-	UserFromRefreshToken    func(string) (interface{}, error)
-	PayloadFromCredentials  func(string, string) (interface{}, error)
-	NewPayloadFromUser      func(interface{}) (interface{}, error)
-	NewRefreshTokenFromUser func(interface{}) (string, error)
-	GetRefreshToken         func(string) (interface{}, error)
-	ValidateUser            func(interface{}, string) error
-	DeleteRefreshToken      func(string) error
+	UserFromCredentials             func(string, string) (interface{}, error)
+	UserFromRefreshToken            func(string) (interface{}, error)
+	NewPayloadFromUser              func(interface{}) (interface{}, error)
+	NewRefreshTokenFromUser         func(interface{}) (string, error)
+	ValidateRefreshTokenFromPayload func(string, interface{}) error
+	RevokeRefreshToken              func(string) error
 }
 
 type GoAwayConfig struct {
@@ -76,21 +73,13 @@ func (g *GoAway) Login(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
 	// Gets the user payload if the credentials are valid
-	payload, err := g.PayloadFromCredentials(req.Username, req.Password)
+	user, err := g.UserFromCredentials(req.Username, req.Password)
 	if err != nil {
-		JSONResponse(w, http.StatusUnauthorized, ErrInvalidCredentials)
-	}
-	// Gets and validates the requested user and creates a token pair
-	user, err := g.UserFromName(req.Username)
-	if err != nil {
-		JSONResponse(w, http.StatusUnauthorized, ErrInvalidCredentials)
-		return
-	}
-	if err := g.ValidateUser(user, req.Password); err != nil {
 		JSONResponse(w, http.StatusUnauthorized, ErrInvalidCredentials)
 		return
 	}
 
+	// Generates a new token pair from the given payload
 	now := time.Now()
 	accessToken, refreshToken, err := g.generateTokenPair(user, now)
 	if err != nil {
@@ -134,8 +123,8 @@ func (g *GoAway) Logout(w http.ResponseWriter, r *http.Request) {
 		JSONResponse(w, http.StatusBadRequest, ErrCookieIsMissing(err))
 		return
 	}
-	if err := g.DeleteRefreshToken(refreshTokenCookie.Value); err != nil {
-		JSONResponse(w, http.StatusInternalServerError, ErrFailDeleteRefreshToken(err))
+	if err := g.RevokeRefreshToken(refreshTokenCookie.Value); err != nil {
+		JSONResponse(w, http.StatusInternalServerError, ErrFailRevokeRefreshToken(err))
 		return
 	}
 
@@ -160,14 +149,18 @@ func (g *GoAway) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Rotate the refresh token and retrieve the user from it
-	user, err := g.rotateRefreshToken(refreshTokenCookie.Value)
+	// Rotates the tokens and generates a new pair
+	user, err := g.UserFromRefreshToken(refreshTokenCookie.Value)
 	if err != nil {
-		JSONResponse(w, http.StatusBadRequest, ErrFailTokenRotation(err))
+		JSONResponse(w, http.StatusInternalServerError, ErrInvalidRefreshToken(err))
+		return
 	}
-
-	now := time.Now()
-	accessToken, refreshToken, err := g.generateTokenPair(user, now)
+	if err := g.RevokeRefreshToken(refreshTokenCookie.Value); err != nil {
+		JSONResponse(w, http.StatusInternalServerError, ErrFailRevokeRefreshToken(err))
+		return
+	}
+	createdAt := time.Now()
+	accessToken, refreshToken, err := g.generateTokenPair(user, createdAt)
 	if err != nil {
 		JSONResponse(w, http.StatusInternalServerError, ErrFailGenerateTokenPair(err))
 		return
@@ -177,14 +170,14 @@ func (g *GoAway) Refresh(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     g.CookieAccessToken,
 		Value:    accessToken,
-		Expires:  now.Add(g.AccessTokenTTL),
+		Expires:  createdAt.Add(g.AccessTokenTTL),
 		HttpOnly: true,
 		Path:     "/",
 	})
 	http.SetCookie(w, &http.Cookie{
 		Name:     g.CookieRefreshToken,
 		Value:    refreshToken,
-		Expires:  now.Add(g.RefreshTokenTTL),
+		Expires:  createdAt.Add(g.RefreshTokenTTL),
 		HttpOnly: true,
 		Path:     "/",
 	})
@@ -219,6 +212,12 @@ func (g *GoAway) ValidateAccessToken(next http.Handler) http.Handler {
 			return
 		}
 
+		// Checks if the refresh token matches the access token
+		if err := g.ValidateRefreshTokenFromPayload(refreshTokenCookie.Value, payload); err != nil {
+			JSONResponse(w, http.StatusUnauthorized, ErrInvalidRefreshToken(err))
+			return
+		}
+
 		// Attaches the payload to the requests context and serves the next handler
 		context.Set(r, g.ContextPayload, payload)
 		next.ServeHTTP(w, r)
@@ -226,13 +225,14 @@ func (g *GoAway) ValidateAccessToken(next http.Handler) http.Handler {
 
 }
 
-func (g *GoAway) generateTokenPair(user interface{}, now time.Time) (string, string, error) {
+// Returns a freshly generated pair of accessToken and refreshToken from the given user and synced timestamp.
+func (g *GoAway) generateTokenPair(user interface{}, createdAt time.Time) (string, string, error) {
 	payload, err := g.NewPayloadFromUser(user)
 	if err != nil {
 		return "", "", err
 	}
 	accessToken, err := GenerateAccessToken(
-		now.Add(g.AccessTokenTTL),
+		createdAt.Add(g.AccessTokenTTL),
 		payload,
 		os.Getenv(g.EnvAccessTokenPrivateKey))
 	if err != nil {
@@ -243,19 +243,4 @@ func (g *GoAway) generateTokenPair(user interface{}, now time.Time) (string, str
 		return "", "", err
 	}
 	return accessToken, refreshToken, nil
-}
-
-func (g *GoAway) rotateRefreshToken(refreshToken string) (interface{}, error) {
-	id, err := g.GetRefreshToken(refreshToken)
-	if err != nil {
-		return nil, err
-	}
-	if err := g.DeleteRefreshToken(refreshToken); err != nil {
-		return nil, err
-	}
-	user, err := g.UserFromID(id)
-	if err != nil {
-		return nil, err
-	}
-	return user, nil
 }
