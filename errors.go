@@ -20,13 +20,16 @@ func ErrInvalidRequestBody(err error) Response {
 func ErrInvalidAccessToken(err error) Response {
 	return Response{Status: "error", Message: fmt.Sprintf("access token validation failed: %s", err.Error())}
 }
+func ErrInvalidRefreshToken(err error) Response {
+	return Response{Status: "error", Message: fmt.Sprintf("refresh token validation failed: %s", err.Error())}
+}
 func ErrFailGenerateTokenPair(err error) Response {
 	return Response{Status: "error", Message: fmt.Sprintf("failed to generate token pair: %s", err.Error())}
 }
 func ErrFailTokenRotation(err error) Response {
 	return Response{Status: "error", Message: fmt.Sprintf("rotation of refresh token failed: %s", err.Error())}
 }
-func ErrFailDeleteRefreshToken(err error) Response {
+func ErrFailRevokeRefreshToken(err error) Response {
 	return Response{Status: "error", Message: fmt.Sprintf("could not delete refresh token: %s", err.Error())}
 }
 func ErrCookieIsMissing(err error) Response {
