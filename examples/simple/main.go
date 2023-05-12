@@ -4,20 +4,27 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"path/filepath"
 	"time"
 
 	"github.com/goaway-auth/goaway"
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
+	"github.com/segmentio/ksuid"
 )
 
-type user struct {
-	Id       uint   `json:"id"`
+type User struct {
+	Id       int    `json:"id"`
 	Username string `json:"username"`
 	Password string `json:"-"`
 }
 
-var users = []user{
+type Payload struct {
+	Id       int    `json:"id"`
+	Username string `json:"username"`
+}
+
+var users = []User{
 	{
 		Id:       0,
 		Username: "user1",
@@ -35,24 +42,28 @@ var users = []user{
 	},
 }
 
-var refreshTokenStore map[string]uint = make(map[string]uint)
+var refreshTokenStore map[string]int = make(map[string]int)
 
 func init() {
-	if err := godotenv.Load("./examples/example.env"); err != nil {
+	path, err := filepath.Abs("./example.env")
+	if err != nil {
+		log.Fatalf("filepath does not exist: %s", err.Error())
+	}
+	log.Printf("loading .env file at '%s'\n", path)
+	if err := godotenv.Load(path); err != nil {
 		log.Fatal("could not load env")
 	}
+	log.Println("successfully loaded .env")
 }
 
 func main() {
 	gw := goaway.NewGoAway(goaway.GoAwayFunctions{
-		GetUserFromName:      getUserFromName,
-		GetUserFromID:        getUserFromID,
-		ValidateUser:         validateUser,
-		GetUserID:            getUserID,
-		GeneratePayload:      generatePayload,
-		AddToTokenStore:      addToTokenStore,
-		GetFromTokenStore:    getFromTokenStore,
-		DeleteFromTokenStore: deleteFromTokenStore,
+		UserFromCredentials:             UserFromCredentials,
+		UserFromRefreshToken:            UserFromRefreshToken,
+		NewPayloadFromUser:              NewPayloadFromUser,
+		NewRefreshTokenFromUser:         NewRefreshTokenFromUser,
+		ValidateRefreshTokenFromPayload: ValidateRefreshTokenFromPayload,
+		RevokeRefreshToken:              RevokeRefreshToken,
 	})
 
 	r := mux.NewRouter()
@@ -76,74 +87,69 @@ func main() {
 
 func testHandler(w http.ResponseWriter, r *http.Request) { goaway.JSONResponse(w, 200, "test") }
 
-func getUserFromName(username string) (interface{}, error) {
+func UserFromCredentials(username, password string) (interface{}, error) {
 	for _, u := range users {
 		if u.Username == username {
-			return u, nil
+			if u.Password == password {
+				return u, nil
+			}
+			return nil, fmt.Errorf("wrong password")
 		}
 	}
 	return nil, fmt.Errorf("user '%s' not found", username)
 }
 
-func getUserFromID(iID interface{}) (interface{}, error) {
-	id, ok := iID.(uint)
+func UserFromRefreshToken(refreshToken string) (interface{}, error) {
+	id, ok := refreshTokenStore[refreshToken]
 	if !ok {
-		return nil, fmt.Errorf("could not parse id")
+		return nil, fmt.Errorf("refresh token '%s' does not exist", refreshToken)
 	}
-
 	for _, u := range users {
 		if u.Id == id {
 			return u, nil
 		}
 	}
-	return nil, fmt.Errorf("user with id '%d' not found", id)
+	return nil, fmt.Errorf("refresh token does not match a user")
 }
 
-func validateUser(iUser interface{}, password string) error {
-	u, ok := iUser.(user)
+func NewPayloadFromUser(iUser interface{}) (interface{}, error) {
+	u, ok := iUser.(User)
 	if !ok {
-		return fmt.Errorf("could not parse user")
+		return nil, fmt.Errorf("could not parse user")
 	}
-	if u.Password != password {
-		return fmt.Errorf("wrong password")
+	return Payload{Id: u.Id, Username: u.Username}, nil
+}
+
+func NewRefreshTokenFromUser(iUser interface{}) (string, error) {
+	user, ok := iUser.(User)
+	if !ok {
+		return "", fmt.Errorf("could not parse user")
+	}
+	refreshToken, err := ksuid.NewRandom()
+	if err != nil {
+		return "", err
+	}
+	refreshTokenStore[refreshToken.String()] = user.Id
+	return refreshToken.String(), nil
+}
+
+func ValidateRefreshTokenFromPayload(refreshToken string, iPayload interface{}) error {
+	id, ok := refreshTokenStore[refreshToken]
+	if !ok {
+		return fmt.Errorf("refresh token '%s' not found", refreshToken)
+	}
+	// FIXME: iPayload parses integers to float64 therfore can not parse to Payload type
+	payload, ok := iPayload.(Payload)
+	if !ok {
+		return fmt.Errorf("could not parse payload")
+	}
+	if payload.Id != id {
+		return fmt.Errorf("payload id does not match refresh token id")
 	}
 	return nil
 }
 
-func getUserID(iUser interface{}) (interface{}, error) {
-	u, ok := iUser.(user)
-	if !ok {
-		return nil, fmt.Errorf("could not parse user")
-	}
-	return u.Id, nil
-}
-
-func generatePayload(iUser interface{}) (interface{}, error) {
-	u, ok := iUser.(user)
-	if !ok {
-		return nil, fmt.Errorf("could not parse user")
-	}
-	return user{Id: u.Id, Username: u.Username}, nil
-}
-
-func addToTokenStore(refreshToken string, iId interface{}) error {
-	id, ok := iId.(uint)
-	if !ok {
-		return fmt.Errorf("could not parse id")
-	}
-	refreshTokenStore[refreshToken] = id
-	return nil
-}
-
-func getFromTokenStore(refreshToken string) (interface{}, error) {
-	token, ok := refreshTokenStore[refreshToken]
-	if !ok {
-		return nil, fmt.Errorf("could not find refresh token")
-	}
-	return token, nil
-}
-
-func deleteFromTokenStore(refreshToken string) error {
+func RevokeRefreshToken(refreshToken string) error {
 	delete(refreshTokenStore, refreshToken)
 	return nil
 }
