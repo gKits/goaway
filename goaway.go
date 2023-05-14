@@ -8,17 +8,17 @@ import (
 	"github.com/gorilla/context"
 )
 
-type GoAway struct {
-	GoAwayFunctions
+type GoAway[U, P interface{}] struct {
+	GoAwayFunctions[U, P]
 	GoAwayConfig
 }
 
-type GoAwayFunctions struct {
-	UserFromCredentials             func(string, string) (interface{}, error)
-	UserFromRefreshToken            func(string) (interface{}, error)
-	NewPayloadFromUser              func(interface{}) (interface{}, error)
-	NewRefreshTokenFromUser         func(interface{}) (string, error)
-	ValidateRefreshTokenFromPayload func(string, interface{}) error
+type GoAwayFunctions[U, P interface{}] struct {
+	UserFromCredentials             func(string, string) (U, error)
+	UserFromRefreshToken            func(string) (U, error)
+	NewPayloadFromUser              func(U) (P, error)
+	NewRefreshTokenFromUser         func(U) (string, error)
+	ValidateRefreshTokenFromPayload func(string, P) error
 	RevokeRefreshToken              func(string) error
 }
 
@@ -51,10 +51,10 @@ var DefaultGoAwayConfig = GoAwayConfig{
 }
 
 // Returns a GoAway object
-func NewGoAway(
-	functions GoAwayFunctions,
-	config ...GoAwayConfig) GoAway {
-	return GoAway{
+func NewGoAway[U, P interface{}](
+	functions GoAwayFunctions[U, P],
+	config ...GoAwayConfig) GoAway[U, P] {
+	return GoAway[U, P]{
 		GoAwayFunctions: functions,
 		GoAwayConfig:    DefaultGoAwayConfig,
 	}
@@ -65,7 +65,7 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
-func (g *GoAway) Login(w http.ResponseWriter, r *http.Request) {
+func (g *GoAway[U, P]) Login(w http.ResponseWriter, r *http.Request) {
 	// Only allows POST request otherwise responds with an error 405
 	if r.Method != "POST" {
 		JSONResponse(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed(r.Method))
@@ -106,7 +106,7 @@ func (g *GoAway) Login(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (g *GoAway) Logout(w http.ResponseWriter, r *http.Request) {
+func (g *GoAway[U, P]) Logout(w http.ResponseWriter, r *http.Request) {
 	// Only allows POST request otherwise responds with an error 405
 	if r.Method != "POST" {
 		JSONResponse(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed(r.Method))
@@ -131,7 +131,7 @@ func (g *GoAway) Logout(w http.ResponseWriter, r *http.Request) {
 	JSONResponse(w, http.StatusOK, ResSuccessfulLogout)
 }
 
-func (g *GoAway) Refresh(w http.ResponseWriter, r *http.Request) {
+func (g *GoAway[U, P]) Refresh(w http.ResponseWriter, r *http.Request) {
 	// Only allows POST request otherwise responds with an error 405
 	if r.Method != "POST" {
 		JSONResponse(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed(r.Method))
@@ -175,7 +175,7 @@ func (g *GoAway) Refresh(w http.ResponseWriter, r *http.Request) {
 
 // Returns a http Handler that takes the access token from the requests cookie and validates it.
 // The extracted paylod of the access token is attached to the context.
-func (g *GoAway) ValidateAccessToken(next http.Handler) http.Handler {
+func (g *GoAway[U, P]) ValidateAccessToken(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Gets the tokens from the cookies
 		accessTokenCookie, err := r.Cookie(g.CookieAccessToken)
@@ -188,7 +188,7 @@ func (g *GoAway) ValidateAccessToken(next http.Handler) http.Handler {
 			JSONResponse(w, http.StatusUnauthorized, ErrCookieIsMissing(err))
 		}
 
-		payload, err := ValidateAccessToken(
+		claims, err := ValidateAccessToken[P](
 			accessTokenCookie.Value,
 			os.Getenv(g.EnvAccessTokenPublicKey))
 		if err != nil {
@@ -197,20 +197,20 @@ func (g *GoAway) ValidateAccessToken(next http.Handler) http.Handler {
 		}
 
 		// Checks if the refresh token matches the access token
-		if err := g.ValidateRefreshTokenFromPayload(refreshTokenCookie.Value, payload); err != nil {
+		if err := g.ValidateRefreshTokenFromPayload(refreshTokenCookie.Value, claims.Data); err != nil {
 			JSONResponse(w, http.StatusUnauthorized, ErrInvalidRefreshToken(err))
 			return
 		}
 
 		// Attaches the payload to the requests context and serves the next handler
-		context.Set(r, g.ContextPayload, payload)
+		context.Set(r, g.ContextPayload, claims.Data)
 		next.ServeHTTP(w, r)
 	})
 
 }
 
 // Returns a freshly generated pair of accessToken and refreshToken from the given user and synced timestamp.
-func (g *GoAway) generateTokenPair(user interface{}, createdAt time.Time) (string, string, error) {
+func (g *GoAway[U, P]) generateTokenPair(user U, createdAt time.Time) (string, string, error) {
 	payload, err := g.NewPayloadFromUser(user)
 	if err != nil {
 		return "", "", err
@@ -218,6 +218,7 @@ func (g *GoAway) generateTokenPair(user interface{}, createdAt time.Time) (strin
 	accessToken, err := GenerateAccessToken(
 		createdAt.Add(g.AccessTokenTTL),
 		payload,
+		"",
 		os.Getenv(g.EnvAccessTokenPrivateKey))
 	if err != nil {
 		return "", "", err
