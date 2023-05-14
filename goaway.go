@@ -30,6 +30,10 @@ type GoAwayConfig struct {
 	CookieAccessToken        string
 	CookieRefreshToken       string
 	ContextPayload           string
+	CookieDomain             string
+	CookiePath               string
+	CookieHttpOnly           bool
+	CookieSecure             bool
 }
 
 var DefaultGoAwayConfig = GoAwayConfig{
@@ -40,6 +44,10 @@ var DefaultGoAwayConfig = GoAwayConfig{
 	CookieAccessToken:        "access_token",
 	CookieRefreshToken:       "refresh_token",
 	ContextPayload:           "payload",
+	CookieDomain:             "",
+	CookiePath:               "/",
+	CookieHttpOnly:           true,
+	CookieSecure:             false,
 }
 
 // Returns a GoAway object
@@ -88,8 +96,8 @@ func (g *GoAway) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generates cookies for access and refresh tokens and set them in the request
-	http.SetCookie(w, NewCookie(g.CookieAccessToken, accessToken, "", "/", now.Add(g.AccessTokenTTL), true, true))
-	http.SetCookie(w, NewCookie(g.CookieRefreshToken, refreshToken, "", "/", now.Add(g.RefreshTokenTTL), true, true))
+	http.SetCookie(w, NewCookie(g.CookieAccessToken, accessToken, g.CookieDomain, g.CookiePath, now.Add(g.AccessTokenTTL), g.CookieHttpOnly, g.CookieSecure))
+	http.SetCookie(w, NewCookie(g.CookieRefreshToken, refreshToken, g.CookieDomain, g.CookiePath, now.Add(g.RefreshTokenTTL), g.CookieHttpOnly, g.CookieSecure))
 
 	JSONResponse(w, http.StatusOK, Response{
 		Status:       "success",
