@@ -8,7 +8,12 @@ import (
 	"github.com/golang-jwt/jwt/v4"
 )
 
-func GenerateAccessToken(expiresIn time.Time, payload interface{}, privateKey string) (string, error) {
+type GoAwayClaims[P interface{}] struct {
+	Data P
+	jwt.RegisteredClaims
+}
+
+func GenerateAccessToken[P interface{}](expiresAt time.Time, payload P, id, privateKey string) (string, error) {
 	// Decode B64 encoded private key
 	pemKey, err := base64.StdEncoding.DecodeString(privateKey)
 	if err != nil {
@@ -21,15 +26,14 @@ func GenerateAccessToken(expiresIn time.Time, payload interface{}, privateKey st
 		return "", err
 	}
 
-	// Create claims with payload that expires in ttl
-	now := time.Now().UTC()
-
-	claims := make(jwt.MapClaims)
-	claims["sub"] = payload
-	claims["exp"] = expiresIn.Unix()
-	claims["iat"] = now.Unix()
-	claims["nbf"] = now.Unix()
-
+	claims := GoAwayClaims[P]{
+		Data: payload,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        id,
+			ExpiresAt: jwt.NewNumericDate(expiresAt),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+	}
 	// Generate token and sign it with private key
 	token, err := jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(key)
 	if err != nil {
@@ -44,7 +48,7 @@ func GenerateAccessToken(expiresIn time.Time, payload interface{}, privateKey st
 // Type of the targetClaims has to be specified as a generic
 //
 // Returns an error if the decoding, parsing or validation fails
-func ValidateAccessToken(token, publicKey string) (interface{}, error) {
+func ValidateAccessToken[P interface{}](token, publicKey string) (*GoAwayClaims[P], error) {
 	// Decode B64 encoded public key
 	pemKey, err := base64.StdEncoding.DecodeString(publicKey)
 	if err != nil {
@@ -59,7 +63,7 @@ func ValidateAccessToken(token, publicKey string) (interface{}, error) {
 
 	parser := jwt.NewParser(jwt.WithJSONNumber())
 
-	parsedToken, err := parser.Parse(token, func(t *jwt.Token) (interface{}, error) {
+	parsedToken, err := parser.ParseWithClaims(token, GoAwayClaims[P]{}, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodRSA); !ok {
 			return nil, fmt.Errorf("unexpected method: %s", t.Header["alg"])
 		}
@@ -70,10 +74,10 @@ func ValidateAccessToken(token, publicKey string) (interface{}, error) {
 		return nil, err
 	}
 
-	claims, ok := parsedToken.Claims.(jwt.MapClaims)
+	claims, ok := parsedToken.Claims.(GoAwayClaims[P])
 	if !ok || !parsedToken.Valid {
 		return nil, fmt.Errorf("invalid token")
 	}
 
-	return claims["sub"], nil
+	return &claims, nil
 }
