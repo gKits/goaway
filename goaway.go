@@ -88,16 +88,16 @@ func (g *GoAway) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generates a new token pair from the given payload
-	now := time.Now()
-	accessToken, refreshToken, err := g.generateTokenPair(user, now)
+	createdAt := time.Now()
+	accessToken, refreshToken, err := g.generateTokenPair(user, createdAt)
 	if err != nil {
 		JSONResponse(w, http.StatusInternalServerError, ErrFailGenerateTokenPair(err))
 		return
 	}
 
 	// Generates cookies for access and refresh tokens and set them in the request
-	http.SetCookie(w, NewCookie(g.CookieAccessToken, accessToken, g.CookieDomain, g.CookiePath, now.Add(g.AccessTokenTTL), g.CookieHttpOnly, g.CookieSecure))
-	http.SetCookie(w, NewCookie(g.CookieRefreshToken, refreshToken, g.CookieDomain, g.CookiePath, now.Add(g.RefreshTokenTTL), g.CookieHttpOnly, g.CookieSecure))
+	http.SetCookie(w, NewCookie(g.CookieAccessToken, accessToken, g.CookieDomain, g.CookiePath, createdAt.Add(g.AccessTokenTTL), g.CookieHttpOnly, g.CookieSecure))
+	http.SetCookie(w, NewCookie(g.CookieRefreshToken, refreshToken, g.CookieDomain, g.CookiePath, createdAt.Add(g.RefreshTokenTTL), g.CookieHttpOnly, g.CookieSecure))
 
 	JSONResponse(w, http.StatusOK, Response{
 		Status:       "success",
@@ -125,8 +125,8 @@ func (g *GoAway) Logout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Clears the cookies containing the access and refresh tokens
-	http.SetCookie(w, &http.Cookie{Name: g.CookieAccessToken, Expires: time.Now()})
-	http.SetCookie(w, &http.Cookie{Name: g.CookieRefreshToken, Expires: time.Now()})
+	http.SetCookie(w, NewCookie(g.CookieAccessToken, "", g.CookieDomain, g.CookiePath, time.Now(), g.CookieHttpOnly, g.CookieSecure))
+	http.SetCookie(w, NewCookie(g.CookieRefreshToken, "", g.CookieDomain, g.CookiePath, time.Now(), g.CookieHttpOnly, g.CookieSecure))
 
 	JSONResponse(w, http.StatusOK, ResSuccessfulLogout)
 }
@@ -163,20 +163,8 @@ func (g *GoAway) Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generates cookies for the token pair and set them in the request
-	http.SetCookie(w, &http.Cookie{
-		Name:     g.CookieAccessToken,
-		Value:    accessToken,
-		Expires:  createdAt.Add(g.AccessTokenTTL),
-		HttpOnly: true,
-		Path:     "/",
-	})
-	http.SetCookie(w, &http.Cookie{
-		Name:     g.CookieRefreshToken,
-		Value:    refreshToken,
-		Expires:  createdAt.Add(g.RefreshTokenTTL),
-		HttpOnly: true,
-		Path:     "/",
-	})
+	http.SetCookie(w, NewCookie(g.CookieAccessToken, accessToken, g.CookieDomain, g.CookiePath, createdAt.Add(g.AccessTokenTTL), g.CookieHttpOnly, g.CookieSecure))
+	http.SetCookie(w, NewCookie(g.CookieRefreshToken, refreshToken, g.CookieDomain, g.CookiePath, createdAt.Add(g.RefreshTokenTTL), g.CookieHttpOnly, g.CookieSecure))
 
 	JSONResponse(w, http.StatusOK, Response{
 		Status:       "success",
