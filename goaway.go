@@ -88,20 +88,8 @@ func (g *GoAway) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generates cookies for access and refresh tokens and set them in the request
-	http.SetCookie(w, &http.Cookie{
-		Name:     g.CookieAccessToken,
-		Value:    accessToken,
-		Expires:  now.Add(g.AccessTokenTTL),
-		HttpOnly: true,
-		Path:     "/",
-	})
-	http.SetCookie(w, &http.Cookie{
-		Name:     g.CookieRefreshToken,
-		Value:    refreshToken,
-		Expires:  now.Add(g.RefreshTokenTTL),
-		HttpOnly: true,
-		Path:     "/",
-	})
+	http.SetCookie(w, NewCookie(g.CookieAccessToken, accessToken, "", "/", now.Add(g.AccessTokenTTL), true, true))
+	http.SetCookie(w, NewCookie(g.CookieRefreshToken, refreshToken, "", "/", now.Add(g.RefreshTokenTTL), true, true))
 
 	JSONResponse(w, http.StatusOK, Response{
 		Status:       "success",
