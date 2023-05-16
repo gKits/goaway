@@ -1,2 +1,2 @@
-# goaway
-A Go package so simplify JWT authentication with GoFiber.
+# GoAway
+A Go package so simplify JWT authentication with net/http + gorilla/mux.
