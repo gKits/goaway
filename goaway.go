@@ -23,6 +23,11 @@ type GoAwayFunctions[U, P interface{}] struct {
 	RevokeRefreshToken              func(string) error
 }
 
+type LoginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
 type GoAwayConfig struct {
 	AccessTokenTTL           time.Duration
 	RefreshTokenTTL          time.Duration
@@ -51,7 +56,14 @@ var DefaultGoAwayConfig = GoAwayConfig{
 	CookieSecure:             false,
 }
 
-// Returns a GoAway object
+// Create a new GoAway object with the given User and Payload type and the functions:
+//
+//	UfC: UserFromCredentials: returns the user if username and password are valid
+//	UfRT: UserFromRefreshToken: returns the user by checking the refresh tokens owner
+//	NPfU: NewPayloadFromuser: returns a new payload by generating it from the users data
+//	NRTfU: NewRefreshTokenFromUser: generates a new refresh token from the users data and returns the token string
+//	VRTfP: ValidateRefreshTokenFromPayload: compares the attached data of the refresh token to the payload
+//	RRT: RevokeRefreshToken: revokes the refresh token
 func NewGoAway[U, P interface{}](
 	UfC func(string, string) (U, error),
 	UfRT func(string) (U, error),
@@ -86,19 +98,13 @@ func NewGoAway[U, P interface{}](
 	}, nil
 }
 
-type LoginRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-}
-
+// Login handler that takes username and password from the request body and generates a token pair if the credentials are valid.
 func (g *GoAway[U, P]) Login(w http.ResponseWriter, r *http.Request) {
-	// Only allows POST request otherwise responds with an error 405
 	if r.Method != "POST" {
 		JSONResponse(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed(r.Method))
 		return
 	}
 
-	// Parses the request body
 	var req LoginRequest
 	if err := MustParseRequest(r.Body, &req); err != nil {
 		JSONResponse(w, http.StatusBadRequest, ErrInvalidRequestBody(err))
@@ -106,14 +112,12 @@ func (g *GoAway[U, P]) Login(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	// Gets the user payload if the credentials are valid
 	user, err := g.UserFromCredentials(req.Username, req.Password)
 	if err != nil {
 		JSONResponse(w, http.StatusUnauthorized, ErrInvalidCredentials)
 		return
 	}
 
-	// Generates a new token pair from the given payload
 	createdAt := time.Now()
 	accessToken, refreshToken, err := g.generateTokenPair(user, createdAt)
 	if err != nil {
@@ -121,7 +125,6 @@ func (g *GoAway[U, P]) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generates cookies for access and refresh tokens and set them in the request
 	http.SetCookie(w, NewCookie(g.CookieAccessToken, accessToken, g.CookieDomain, g.CookiePath, createdAt.Add(g.AccessTokenTTL), g.CookieHttpOnly, g.CookieSecure))
 	http.SetCookie(w, NewCookie(g.CookieRefreshToken, refreshToken, g.CookieDomain, g.CookiePath, createdAt.Add(g.RefreshTokenTTL), g.CookieHttpOnly, g.CookieSecure))
 
@@ -132,14 +135,13 @@ func (g *GoAway[U, P]) Login(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Logout handler that revokes the refresh token and removes the access and refresh token from the cookie.
 func (g *GoAway[U, P]) Logout(w http.ResponseWriter, r *http.Request) {
-	// Only allows POST request otherwise responds with an error 405
 	if r.Method != "POST" {
 		JSONResponse(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed(r.Method))
 		return
 	}
 
-	// Gets the refresh token from the cookie and deletes it from token store
 	refreshTokenCookie, err := r.Cookie(g.CookieRefreshToken)
 	if err != nil {
 		JSONResponse(w, http.StatusBadRequest, ErrCookieIsMissing(err))
@@ -150,28 +152,25 @@ func (g *GoAway[U, P]) Logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Clears the cookies containing the access and refresh tokens
 	http.SetCookie(w, NewCookie(g.CookieAccessToken, "", g.CookieDomain, g.CookiePath, time.Now(), g.CookieHttpOnly, g.CookieSecure))
 	http.SetCookie(w, NewCookie(g.CookieRefreshToken, "", g.CookieDomain, g.CookiePath, time.Now(), g.CookieHttpOnly, g.CookieSecure))
 
 	JSONResponse(w, http.StatusOK, ResSuccessfulLogout)
 }
 
+// Refresh handler revokes the old refresh token and generates a new token pair from the old pair.
 func (g *GoAway[U, P]) Refresh(w http.ResponseWriter, r *http.Request) {
-	// Only allows POST request otherwise responds with an error 405
 	if r.Method != "POST" {
 		JSONResponse(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed(r.Method))
 		return
 	}
 
-	// Gets the refresh token from the cookie and first gets and the deletes it from token store
 	refreshTokenCookie, err := r.Cookie(g.CookieRefreshToken)
 	if err != nil {
 		JSONResponse(w, http.StatusBadRequest, ErrCookieIsMissing(err))
 		return
 	}
 
-	// Rotates the tokens and generates a new pair
 	user, err := g.UserFromRefreshToken(refreshTokenCookie.Value)
 	if err != nil {
 		JSONResponse(w, http.StatusInternalServerError, ErrInvalidRefreshToken(err))
@@ -188,7 +187,6 @@ func (g *GoAway[U, P]) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generates cookies for the token pair and set them in the request
 	http.SetCookie(w, NewCookie(g.CookieAccessToken, accessToken, g.CookieDomain, g.CookiePath, createdAt.Add(g.AccessTokenTTL), g.CookieHttpOnly, g.CookieSecure))
 	http.SetCookie(w, NewCookie(g.CookieRefreshToken, refreshToken, g.CookieDomain, g.CookiePath, createdAt.Add(g.RefreshTokenTTL), g.CookieHttpOnly, g.CookieSecure))
 
@@ -199,11 +197,9 @@ func (g *GoAway[U, P]) Refresh(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Returns a http Handler that takes the access token from the requests cookie and validates it.
-// The extracted paylod of the access token is attached to the context.
+// Middleware that validates the access token from the cookie and attaches its paylod to the context.
 func (g *GoAway[U, P]) ValidateAccessToken(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Gets the tokens from the cookies
 		accessTokenCookie, err := r.Cookie(g.CookieAccessToken)
 		if err != nil {
 			JSONResponse(w, http.StatusUnauthorized, ErrCookieIsMissing(err))
@@ -222,13 +218,11 @@ func (g *GoAway[U, P]) ValidateAccessToken(next http.Handler) http.Handler {
 			return
 		}
 
-		// Checks if the refresh token matches the access token
 		if err := g.ValidateRefreshTokenFromPayload(refreshTokenCookie.Value, claims.Data); err != nil {
 			JSONResponse(w, http.StatusUnauthorized, ErrInvalidRefreshToken(err))
 			return
 		}
 
-		// Attaches the payload to the requests context and serves the next handler
 		context.Set(r, g.ContextPayload, claims.Data)
 		next.ServeHTTP(w, r)
 	})
@@ -241,6 +235,7 @@ func (g *GoAway[U, P]) generateTokenPair(user U, createdAt time.Time) (string, s
 	if err != nil {
 		return "", "", err
 	}
+	// TODO: Generate a unique identifier for the token pair
 	accessToken, err := GenerateAccessToken(
 		createdAt.Add(g.AccessTokenTTL),
 		payload,
