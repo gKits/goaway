@@ -1,6 +1,7 @@
 package goaway
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"time"
@@ -52,12 +53,37 @@ var DefaultGoAwayConfig = GoAwayConfig{
 
 // Returns a GoAway object
 func NewGoAway[U, P interface{}](
-	functions GoAwayFunctions[U, P],
-	config ...GoAwayConfig) GoAway[U, P] {
-	return GoAway[U, P]{
-		GoAwayFunctions: functions,
-		GoAwayConfig:    DefaultGoAwayConfig,
+	UfC func(string, string) (U, error),
+	UfRT func(string) (U, error),
+	NPfU func(U) (P, error),
+	NRTfU func(U) (string, error),
+	VRTfP func(string, P) error,
+	RRT func(string) error,
+	configs ...GoAwayConfig,
+) (*GoAway[U, P], error) {
+	var config *GoAwayConfig
+	if len(configs) > 1 {
+		return nil, fmt.Errorf("GoAway: cannot use multiple configurations")
+	} else if len(configs) == 1 {
+		var err error
+		config, err = Merge(configs[0], DefaultGoAwayConfig)
+		if err != nil {
+			return nil, fmt.Errorf("GoAway: could not merge config with default config: %s", err.Error())
+		}
+	} else {
+		config = &DefaultGoAwayConfig
 	}
+	return &GoAway[U, P]{
+		GoAwayFunctions: GoAwayFunctions[U, P]{
+			UserFromCredentials:             UfC,
+			UserFromRefreshToken:            UfRT,
+			NewPayloadFromUser:              NPfU,
+			NewRefreshTokenFromUser:         NRTfU,
+			ValidateRefreshTokenFromPayload: VRTfP,
+			RevokeRefreshToken:              RRT,
+		},
+		GoAwayConfig: *config,
+	}, nil
 }
 
 type LoginRequest struct {
