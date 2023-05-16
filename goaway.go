@@ -235,6 +235,7 @@ func (g *GoAway[U, P]) generateTokenPair(user U, createdAt time.Time) (string, s
 	if err != nil {
 		return "", "", err
 	}
+	// TODO: Generate a unique identifier for the token pair
 	accessToken, err := GenerateAccessToken(
 		createdAt.Add(g.AccessTokenTTL),
 		payload,
