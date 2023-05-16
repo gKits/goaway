@@ -13,14 +13,15 @@ type GoAwayClaims[P interface{}] struct {
 	jwt.RegisteredClaims
 }
 
+// Returns an access token that contains the given payload of the specified type.
+// It expires at the given expiresAt time and is encoded with RS256 using b64 encoded privateKey.
+// The id is used as a unique identifier of the token.
 func GenerateAccessToken[P interface{}](expiresAt time.Time, payload P, id, privateKey string) (string, error) {
-	// Decode B64 encoded private key
 	pemKey, err := base64.StdEncoding.DecodeString(privateKey)
 	if err != nil {
 		return "", err
 	}
 
-	// Parse key from decoded PEM
 	key, err := jwt.ParseRSAPrivateKeyFromPEM(pemKey)
 	if err != nil {
 		return "", err
@@ -34,7 +35,6 @@ func GenerateAccessToken[P interface{}](expiresAt time.Time, payload P, id, priv
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}
-	// Generate token and sign it with private key
 	token, err := jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(key)
 	if err != nil {
 		return "", err
@@ -43,19 +43,14 @@ func GenerateAccessToken[P interface{}](expiresAt time.Time, payload P, id, priv
 	return token, nil
 }
 
-// Validates the given token string by parsing it with the given publicKey.
-// The extraced claims from the jwt are parsed into the targetClaims.
-// Type of the targetClaims has to be specified as a generic
-//
-// Returns an error if the decoding, parsing or validation fails
+// Returns the claims of the given jwt access token after decoding using RSA with the b64 encoded publicKey.
+// The type of the payload in use has to be specified as a generic type.
 func ValidateAccessToken[P interface{}](token, publicKey string) (*GoAwayClaims[P], error) {
-	// Decode B64 encoded public key
 	pemKey, err := base64.StdEncoding.DecodeString(publicKey)
 	if err != nil {
 		return nil, err
 	}
 
-	// Parse public key from PEM
 	key, err := jwt.ParseRSAPublicKeyFromPEM(pemKey)
 	if err != nil {
 		return nil, err
