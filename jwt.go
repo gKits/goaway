@@ -61,23 +61,20 @@ func ValidateAccessToken[P interface{}](token, publicKey string) (*GoAwayClaims[
 		return nil, err
 	}
 
-	parser := jwt.NewParser(jwt.WithJSONNumber())
-
-	parsedToken, err := parser.ParseWithClaims(token, GoAwayClaims[P]{}, func(t *jwt.Token) (interface{}, error) {
+	parsedToken, err := jwt.ParseWithClaims(token, &GoAwayClaims[P]{}, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodRSA); !ok {
 			return nil, fmt.Errorf("unexpected method: %s", t.Header["alg"])
 		}
 		return key, nil
 	})
-
 	if err != nil {
 		return nil, err
 	}
 
-	claims, ok := parsedToken.Claims.(GoAwayClaims[P])
+	claims, ok := parsedToken.Claims.(*GoAwayClaims[P])
 	if !ok || !parsedToken.Valid {
 		return nil, fmt.Errorf("invalid token")
 	}
 
-	return &claims, nil
+	return claims, nil
 }
