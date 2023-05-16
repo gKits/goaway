@@ -7,15 +7,15 @@ import (
 	"time"
 )
 
-func NewCookie(name, value, domain, path string, expires time.Time, secure, httpOnly bool) *http.Cookie {
+func NewCookie(name, value, domain, path string, expires time.Time, httpOnly, secure bool) *http.Cookie {
 	return &http.Cookie{
 		Name:     name,
 		Value:    value,
 		Domain:   domain,
 		Path:     path,
 		Expires:  expires,
-		Secure:   secure,
 		HttpOnly: httpOnly,
+		Secure:   secure,
 	}
 }
 
