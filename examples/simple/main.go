@@ -14,13 +14,13 @@ import (
 )
 
 type User struct {
-	Id       int    `json:"id"`
+	Id       int    `json:"userid"`
 	Username string `json:"username"`
 	Password string `json:"-"`
 }
 
 type Payload struct {
-	Id       int    `json:"id"`
+	Id       int    `json:"userid"`
 	Username string `json:"username"`
 }
 
@@ -57,14 +57,17 @@ func init() {
 }
 
 func main() {
-	gw := goaway.NewGoAway(goaway.GoAwayFunctions{
-		UserFromCredentials:             UserFromCredentials,
-		UserFromRefreshToken:            UserFromRefreshToken,
-		NewPayloadFromUser:              NewPayloadFromUser,
-		NewRefreshTokenFromUser:         NewRefreshTokenFromUser,
-		ValidateRefreshTokenFromPayload: ValidateRefreshTokenFromPayload,
-		RevokeRefreshToken:              RevokeRefreshToken,
-	})
+	gw, err := goaway.NewGoAway(
+		UserFromCredentials,
+		UserFromRefreshToken,
+		NewPayloadFromUser,
+		NewRefreshTokenFromUser,
+		ValidateRefreshTokenFromPayload,
+		RevokeRefreshToken,
+	)
+	if err != nil {
+		log.Fatalf("Could not create GoAway object: %s", err.Error())
+	}
 
 	r := mux.NewRouter()
 	protected := r.PathPrefix("/protected").Subrouter()
@@ -87,44 +90,36 @@ func main() {
 
 func testHandler(w http.ResponseWriter, r *http.Request) { goaway.JSONResponse(w, 200, "test") }
 
-func UserFromCredentials(username, password string) (interface{}, error) {
+func UserFromCredentials(username, password string) (User, error) {
 	for _, u := range users {
 		if u.Username == username {
 			if u.Password == password {
 				return u, nil
 			}
-			return nil, fmt.Errorf("wrong password")
+			return User{}, fmt.Errorf("wrong password")
 		}
 	}
-	return nil, fmt.Errorf("user '%s' not found", username)
+	return User{}, fmt.Errorf("user '%s' not found", username)
 }
 
-func UserFromRefreshToken(refreshToken string) (interface{}, error) {
+func UserFromRefreshToken(refreshToken string) (User, error) {
 	id, ok := refreshTokenStore[refreshToken]
 	if !ok {
-		return nil, fmt.Errorf("refresh token '%s' does not exist", refreshToken)
+		return User{}, fmt.Errorf("refresh token '%s' does not exist", refreshToken)
 	}
 	for _, u := range users {
 		if u.Id == id {
 			return u, nil
 		}
 	}
-	return nil, fmt.Errorf("refresh token does not match a user")
+	return User{}, fmt.Errorf("refresh token does not match a user")
 }
 
-func NewPayloadFromUser(iUser interface{}) (interface{}, error) {
-	u, ok := iUser.(User)
-	if !ok {
-		return nil, fmt.Errorf("could not parse user")
-	}
+func NewPayloadFromUser(u User) (Payload, error) {
 	return Payload{Id: u.Id, Username: u.Username}, nil
 }
 
-func NewRefreshTokenFromUser(iUser interface{}) (string, error) {
-	user, ok := iUser.(User)
-	if !ok {
-		return "", fmt.Errorf("could not parse user")
-	}
+func NewRefreshTokenFromUser(user User) (string, error) {
 	refreshToken, err := ksuid.NewRandom()
 	if err != nil {
 		return "", err
@@ -133,15 +128,10 @@ func NewRefreshTokenFromUser(iUser interface{}) (string, error) {
 	return refreshToken.String(), nil
 }
 
-func ValidateRefreshTokenFromPayload(refreshToken string, iPayload interface{}) error {
+func ValidateRefreshTokenFromPayload(refreshToken string, payload Payload) error {
 	id, ok := refreshTokenStore[refreshToken]
 	if !ok {
 		return fmt.Errorf("refresh token '%s' not found", refreshToken)
-	}
-	// FIXME: iPayload parses integers to float64 therfore can not parse to Payload type
-	payload, ok := iPayload.(Payload)
-	if !ok {
-		return fmt.Errorf("could not parse payload")
 	}
 	if payload.Id != id {
 		return fmt.Errorf("payload id does not match refresh token id")
