@@ -32,3 +32,14 @@ func MustParseRequest(b io.ReadCloser, v interface{}) error {
 	decoder.DisallowUnknownFields()
 	return decoder.Decode(&v)
 }
+
+func Merge[T interface{}](a, b T) (*T, error) {
+	byteB, err := json.Marshal(b)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(byteB, &a); err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
