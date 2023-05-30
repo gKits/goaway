@@ -63,7 +63,16 @@ var DefaultGoAwayConfig = GoAwayConfig{
 }
 
 // Create a new GoAway object with the given User and Payload type and the functions.
-func NewGoAway[U, P interface{}](funcs GoAwayFunctions[U, P], configs ...GoAwayConfig) (*GoAway[U, P], error) {
+func NewGoAway[U, P interface{}](
+	UserFromCreds func(string, string) (U, error),
+	UserFromRT func(string) (U, error),
+	NewPayload func(U) (P, error),
+	StoreRT func(U) (string, error),
+	RevokeRT func(string) error,
+	BlacklistAT func(string) error,
+	RTIsRevoked func(string) bool,
+	ATIsBlacklisted func(string) bool,
+	configs ...GoAwayConfig) (*GoAway[U, P], error) {
 	var config *GoAwayConfig
 	if len(configs) > 1 {
 		return nil, fmt.Errorf("GoAway: cannot use multiple configurations")
@@ -77,8 +86,17 @@ func NewGoAway[U, P interface{}](funcs GoAwayFunctions[U, P], configs ...GoAwayC
 		config = &DefaultGoAwayConfig
 	}
 	return &GoAway[U, P]{
-		GoAwayFunctions: funcs,
-		GoAwayConfig:    *config,
+		GoAwayFunctions: GoAwayFunctions[U, P]{
+			UserFromCreds:   UserFromCreds,
+			UserFromRT:      UserFromRT,
+			NewPayload:      NewPayload,
+			StoreRT:         StoreRT,
+			RevokeRT:        RevokeRT,
+			BlacklistAT:     BlacklistAT,
+			RTIsRevoked:     RTIsRevoked,
+			ATIsBlacklisted: ATIsBlacklisted,
+		},
+		GoAwayConfig: *config,
 	}, nil
 }
 
@@ -196,7 +214,8 @@ func (g *GoAway[U, P]) Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := g.BlacklistAT(accessToken); err != nil {
-
+		JSONResponse(w, http.StatusInternalServerError, nil)
+		return
 	}
 
 	now := time.Now()
@@ -220,6 +239,10 @@ func (g *GoAway[U, P]) Refresh(w http.ResponseWriter, r *http.Request) {
 func (g *GoAway[U, P]) ValidateAccessToken(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		accessToken, err := AccessTokenFromHeaderOrCookie(r, "Authorization", g.CookieAccessToken)
+		if err != nil {
+			JSONResponse(w, http.StatusUnauthorized, nil)
+			return
+		}
 
 		claims, err := ValidateJWT[P](
 			accessToken,
