@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -31,6 +32,21 @@ func MustParseRequest(b io.ReadCloser, v interface{}) error {
 	decoder := json.NewDecoder(b)
 	decoder.DisallowUnknownFields()
 	return decoder.Decode(&v)
+}
+
+func AccessTokenFromHeaderOrCookie(r *http.Request, header, cookie string) (string, error) {
+	var accessToken string
+	accessToken = r.Header.Get(header)
+	if accessToken == "" {
+		atCookie, err := r.Cookie(cookie)
+		if err != nil {
+			return "", err
+		}
+		accessToken = atCookie.Value
+	} else {
+		accessToken = strings.TrimPrefix(accessToken, "Bearer ")
+	}
+	return accessToken, nil
 }
 
 func Merge[T interface{}](a, b T) (*T, error) {
