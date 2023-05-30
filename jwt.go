@@ -9,7 +9,7 @@ import (
 )
 
 type GoAwayClaims[P interface{}] struct {
-	Data P `json:"data,ommitempty"`
+	Data P `json:"data,omitempty"`
 	jwt.RegisteredClaims
 }
 
